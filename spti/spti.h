@@ -40,6 +40,8 @@ PrintStatusResults(BOOL, DWORD, PSCSI_PASS_THROUGH_WITH_BUFFERS, ULONG);
 VOID
 PrintSenseInfo(PSCSI_PASS_THROUGH_WITH_BUFFERS);
 
+void *memset(void *s, int c, size_t n);
+
 BOOL
 GetAlignmentMaskForDevice(HANDLE, PULONG);
 

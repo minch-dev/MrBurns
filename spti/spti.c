@@ -18,7 +18,10 @@
 #include <stdlib.h>
 #include <strsafe.h>
 #include <intsafe.h>
+#include <string.h>
 #include "spti.h"
+#include <math.h>
+
 //конструкции
 
 #define NAME_COUNT  25
@@ -65,7 +68,14 @@ main(int argc,__nullterminated char *argv[])
 	HANDLE fileHandle = NULL;
 	ULONG alignmentMask = 0; // default == выравнивание не надо
 	PUCHAR dataBuffer = NULL;
+	PUCHAR endBuffer = NULL;
+	PUCHAR dataPattern = 0;
+	PUCHAR endPattern = 0;
+	PUCHAR i = 0;
+	PUCHAR midBuffer = 0;
 	PUCHAR pUnAlignedBuffer = NULL;
+	float LBAdata = 0x07D5C8;
+	float LBAend = 0x086ABA;
 	SCSI_PASS_THROUGH_WITH_BUFFERS sptwb;
 	SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER sptdwb;
 	CHAR string[NAME_COUNT];
@@ -163,46 +173,54 @@ main(int argc,__nullterminated char *argv[])
 	PrintStatusResults(status,returned,(PSCSI_PASS_THROUGH_WITH_BUFFERS)&sptdwb,length);
 
 
+	while (LBAdata <= LBAend){
+		//--buffer
+			ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
+			dataBuffer = AllocateAlignedBuffer(36720,alignmentMask, &pUnAlignedBuffer);
+			endBuffer = dataBuffer + 36720;
+			midBuffer = dataBuffer + 17136;
+			i = dataBuffer;
+			memset(i,0x4A,2352);i+=2352;
+			dataPattern = i;
+			endPattern = i+96;
+			memset(i, 0x54, 1);i++;
+			memset(i, 0x4A, 1);i++;
+			while (i<endPattern){
+			memcpy(i, dataPattern, 2);
+				i+=2;
+			}
 
+			while (i<endBuffer){
+				if(i == midBuffer) {memset(i,0x4A,1224);memset(i+1224,0x54,1128);}
+				else if(i > midBuffer)memset(i,0x54,2352);
+				else memset(i,0x4A,2352);
+				i+=2352;
+				memcpy(i,dataPattern,96);i+=96;
+			}
+		//--buffer
+		sptdwb.sptd.Length = sizeof(SCSI_PASS_THROUGH_DIRECT);
+		sptdwb.sptd.PathId = 0;
+		sptdwb.sptd.TargetId = 1;
+		sptdwb.sptd.Lun = 0;
+		sptdwb.sptd.CdbLength = CDB12GENERIC_LENGTH;
+		sptdwb.sptd.SenseInfoLength = SPT_SENSE_LENGTH;
+		sptdwb.sptd.DataIn = SCSI_IOCTL_DATA_OUT;
+		sptdwb.sptd.DataTransferLength = 36720;
+		sptdwb.sptd.TimeOutValue = 5000;
+		sptdwb.sptd.DataBuffer = dataBuffer;
+		sptdwb.sptd.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER,ucSenseBuf);	//0x30
+		sptdwb.sptd.Cdb[0] = SCSIOP_WRITE12;
+		//--LBA
+			sptdwb.sptd.Cdb[3] = (unsigned char)(LBAdata / 0x10000);
+			sptdwb.sptd.Cdb[4] = (unsigned char)(LBAdata / 0x100);
+			sptdwb.sptd.Cdb[5] = (unsigned char)LBAdata;
+			sptdwb.sptd.Cdb[9] = 0x0F;
 
-
-	printf("            *****       Write (12)         *****\n");
-
-	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-	dataBuffer = AllocateAlignedBuffer(36720,alignmentMask, &pUnAlignedBuffer);
-	FillMemory(dataBuffer,36720,0x54);		//заполняем чёрным
-
-	sptdwb.sptd.Length = sizeof(SCSI_PASS_THROUGH_DIRECT);
-	sptdwb.sptd.PathId = 0;
-	sptdwb.sptd.TargetId = 1;
-	sptdwb.sptd.Lun = 0;
-	sptdwb.sptd.CdbLength = CDB12GENERIC_LENGTH;
-	sptdwb.sptd.SenseInfoLength = SPT_SENSE_LENGTH;
-	sptdwb.sptd.DataIn = SCSI_IOCTL_DATA_OUT;
-	sptdwb.sptd.DataTransferLength = 36720;
-	sptdwb.sptd.TimeOutValue = 65535;
-	sptdwb.sptd.DataBuffer = dataBuffer;
-	sptdwb.sptd.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER,ucSenseBuf);	//0x30
-	sptdwb.sptd.Cdb[0] = SCSIOP_WRITE12;
-	//--LBA
-	sptdwb.sptd.Cdb[3] = 0x23;
-	sptdwb.sptd.Cdb[4] = 0x26;
-	sptdwb.sptd.Cdb[5] = 0x1F;
-	//--
-	sptdwb.sptd.Cdb[9] = 0x0F;
-
-	length = sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER);
-	status = DeviceIoControl(fileHandle,
-								IOCTL_SCSI_PASS_THROUGH_DIRECT,
-								&sptdwb,
-								length,
-								&sptdwb,
-								length,
-								&returned,
-								FALSE);
-
-	PrintStatusResults(status,returned,(PSCSI_PASS_THROUGH_WITH_BUFFERS)&sptdwb,length);
-
+			length = sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER);
+			status = DeviceIoControl(fileHandle,IOCTL_SCSI_PASS_THROUGH_DIRECT,&sptdwb,length,&sptdwb,length,&returned,FALSE);
+			LBAdata+=0xF;
+			//PrintStatusResults(status,returned,(PSCSI_PASS_THROUGH_WITH_BUFFERS)&sptdwb,length);
+	}
 
 
 

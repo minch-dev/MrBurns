@@ -1,0 +1,17 @@
+
+
+386_OBJECTS=\
+ $(OBJ_PATH)\$O\spti.obj \
+
+
+
+
+
+# lowercased
+BASEDIR=v:\winddk\7600.16385.1
+OBJECT_ROOT=v:\winddk\7600.16385.1
+MAKEDIR_LOWERCASE=v:\winddk\7600.16385.1\src\storage\tools\spti
+MAKEDIR_RELATIVE_TO_BASEDIR=src\storage\tools\spti
+OBJ_PATH=v:\winddk\7600.16385.1\src\storage\tools\spti
+CONCURRENT_MIDL=0
+CONCURRENT_MANIFEST_BUILD=0
