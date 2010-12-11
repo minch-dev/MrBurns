@@ -71,11 +71,8 @@ main(int argc,__nullterminated char *argv[])
 	PUCHAR copyEnd = NULL;
 	PUCHAR tjtjBuffer = NULL;
 	PUCHAR tjtjEnd = NULL;
-	PUCHAR imageBuffer = NULL;
-	PUCHAR imageEnd = NULL;
 	PUCHAR dataBuffer = NULL;
 	PUCHAR i = 0;
-	PUCHAR j = 0;
 	PUCHAR pUnAlignedBuffer = NULL;
 	float LBAdata = 0x08A051;
 	float LBAend = 0x08A07E;
@@ -190,27 +187,15 @@ main(int argc,__nullterminated char *argv[])
 	i = 0;
 //-- tjtjBuffer
 
-
-//--image buffer
-	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-	imageBuffer = AllocateAlignedBuffer(35280,alignmentMask, &pUnAlignedBuffer);
-	imageEnd = imageBuffer + 35280; //35280
-	memset(imageBuffer,0x4A,35280);
-	i=imageBuffer;while (i<imageEnd){	memset(i,0x54,5880);i+=11760;	}
-	//memset((imageBuffer+17640),0x54,17640);
-//--image buffer
-
-
 //--copyBuffer
 	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
 	copyBuffer = AllocateAlignedBuffer(36720,alignmentMask, &pUnAlignedBuffer);
 	copyEnd = copyBuffer + 36720;
-	i=copyBuffer;
-	j=imageBuffer;
-	while (i<copyEnd){
-		memcpy(i,j,2352);i+=2352;j+=2352;
-		memcpy(i,tjtjBuffer,96);i+=96;
-	}
+	memset(copyBuffer,0x4A,36720);
+	i=copyBuffer; while (i<copyEnd){	memset(i,0x54,6120);i+=12240;	}
+	//memset(copyBuffer,0x4A,18360);memset((copyBuffer+18360),0x54,18360);
+	i=copyBuffer+2352;
+	while (i<copyEnd){	memcpy(i,tjtjBuffer,96);i+=2448;	}
 //--copyBuffer
 	while (LBAdata <= LBAend){
 		ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));

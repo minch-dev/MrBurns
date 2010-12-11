@@ -68,22 +68,17 @@ main(int argc,__nullterminated char *argv[])
 	HANDLE fileHandle = NULL;
 	ULONG alignmentMask = 0; // default == выравнивание не надо
 	PUCHAR copyBuffer = NULL;
-	PUCHAR copyEnd = NULL;
-	PUCHAR tjtjBuffer = NULL;
-	PUCHAR tjtjEnd = NULL;
-	PUCHAR imageBuffer = NULL;
-	PUCHAR imageEnd = NULL;
 	PUCHAR dataBuffer = NULL;
+	PUCHAR endBuffer = NULL;
+	PUCHAR dataPattern = 0;
+	PUCHAR endPattern = 0;
 	PUCHAR i = 0;
-	PUCHAR j = 0;
+	PUCHAR midBuffer = 0;
 	PUCHAR pUnAlignedBuffer = NULL;
-	float LBAdata = 0x08A051;
-	float LBAend = 0x08A07E;
+	float LBAdata = 1863210;
+	float LBAend = 1863240;
 //0x07D5C8 - 0x086ABA 31-32
 //0x1C6E2A - 0x1D031C 51-52
-//0x08A051 - 0x0B8DBB 32-37
-//
-
 	SCSI_PASS_THROUGH_WITH_BUFFERS sptwb;
 	SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER sptdwb;
 	CHAR string[NAME_COUNT];
@@ -179,44 +174,31 @@ main(int argc,__nullterminated char *argv[])
 
 	printf("            *****       Write         *****\n");
 
-//-- tjtjBuffer
-	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-	tjtjBuffer = AllocateAlignedBuffer(96,alignmentMask, &pUnAlignedBuffer);
-	i = tjtjBuffer;
-	tjtjEnd = tjtjBuffer+96;
-	memset(i, 0x54, 1);i++;
-	memset(i, 0x4A, 1);i++;
-	while (i<tjtjEnd){	memcpy(i, tjtjBuffer, 2);i+=2;	}
-	i = 0;
-//-- tjtjBuffer
-
-
-//--image buffer
-	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-	imageBuffer = AllocateAlignedBuffer(35280,alignmentMask, &pUnAlignedBuffer);
-	imageEnd = imageBuffer + 35280; //35280
-	memset(imageBuffer,0x4A,35280);
-	i=imageBuffer;while (i<imageEnd){	memset(i,0x54,5880);i+=11760;	}
-	//memset((imageBuffer+17640),0x54,17640);
-//--image buffer
-
-
-//--copyBuffer
-	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-	copyBuffer = AllocateAlignedBuffer(36720,alignmentMask, &pUnAlignedBuffer);
-	copyEnd = copyBuffer + 36720;
-	i=copyBuffer;
-	j=imageBuffer;
-	while (i<copyEnd){
-		memcpy(i,j,2352);i+=2352;j+=2352;
-		memcpy(i,tjtjBuffer,96);i+=96;
-	}
-//--copyBuffer
 	while (LBAdata <= LBAend){
-		ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-		dataBuffer = AllocateAlignedBuffer(36720,alignmentMask, &pUnAlignedBuffer);
-		memcpy(dataBuffer, copyBuffer, 36720);
+		//--buffer
+			ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
+			dataBuffer = AllocateAlignedBuffer(36720,alignmentMask, &pUnAlignedBuffer);
+			endBuffer = dataBuffer + 36720;
+			midBuffer = dataBuffer + 17136;
+			i = dataBuffer;
+			memset(i,0x4A,2352);i+=2352;
+			dataPattern = i;
+			endPattern = i+96;
+			memset(i, 0x54, 1);i++;
+			memset(i, 0x4A, 1);i++;
+			while (i<endPattern){
+			memcpy(i, dataPattern, 2);
+				i+=2;
+			}
 
+			while (i<endBuffer){
+				if(i == midBuffer) {memset(i,0x4A,1224);memset(i+1224,0x54,1128);}
+				else if(i > midBuffer)memset(i,0x54,2352);
+				else memset(i,0x4A,2352);
+				i+=2352;
+				memcpy(i,dataPattern,96);i+=96;
+			}
+		//--buffer
 		sptdwb.sptd.Length = sizeof(SCSI_PASS_THROUGH_DIRECT);
 		sptdwb.sptd.PathId = 0;
 		sptdwb.sptd.TargetId = 1;
@@ -229,18 +211,20 @@ main(int argc,__nullterminated char *argv[])
 		sptdwb.sptd.DataBuffer = dataBuffer;
 		sptdwb.sptd.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER,ucSenseBuf);	//0x30
 		sptdwb.sptd.Cdb[0] = SCSIOP_WRITE12;
-	//--LBA
-		sptdwb.sptd.Cdb[3] = (unsigned char)(LBAdata / 0x10000);
-		sptdwb.sptd.Cdb[4] = (unsigned char)(LBAdata / 0x100);
-		sptdwb.sptd.Cdb[5] = (unsigned char)LBAdata;
-	//--LBA
-		sptdwb.sptd.Cdb[9] = 0x0F;
+		//--LBA
+			sptdwb.sptd.Cdb[3] = (unsigned char)(LBAdata / 0x10000);
+			sptdwb.sptd.Cdb[4] = (unsigned char)(LBAdata / 0x100);
+			sptdwb.sptd.Cdb[5] = (unsigned char)LBAdata;
+			sptdwb.sptd.Cdb[9] = 0x0F;
 
-		length = sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER);
-		status = DeviceIoControl(fileHandle,IOCTL_SCSI_PASS_THROUGH_DIRECT,&sptdwb,length,&sptdwb,length,&returned,FALSE);
-		LBAdata+=0xF;
-		//PrintStatusResults(status,returned,(PSCSI_PASS_THROUGH_WITH_BUFFERS)&sptdwb,length);
+			length = sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER);
+			status = DeviceIoControl(fileHandle,IOCTL_SCSI_PASS_THROUGH_DIRECT,&sptdwb,length,&sptdwb,length,&returned,FALSE);
+			LBAdata+=0xF;
+			//PrintStatusResults(status,returned,(PSCSI_PASS_THROUGH_WITH_BUFFERS)&sptdwb,length);
 	}
+
+
+
 
 
 	printf("            *****       Start Stop Unit         *****\n");

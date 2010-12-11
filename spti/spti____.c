@@ -193,11 +193,11 @@ main(int argc,__nullterminated char *argv[])
 
 //--image buffer
 	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-	imageBuffer = AllocateAlignedBuffer(35280,alignmentMask, &pUnAlignedBuffer);
-	imageEnd = imageBuffer + 35280; //35280
-	memset(imageBuffer,0x4A,35280);
-	i=imageBuffer;while (i<imageEnd){	memset(i,0x54,5880);i+=11760;	}
-	//memset((imageBuffer+17640),0x54,17640);
+	imageBuffer = AllocateAlignedBuffer(36720,alignmentMask, &pUnAlignedBuffer);
+	imageEnd = imageBuffer + 36720; //35280
+	memset(imageBuffer,0x4A,36720);
+	i=imageBuffer; while (i<imageEnd){	memset(i,0x54,5880);i+=11760;	}
+	//memset(copyBuffer,0x4A,18360);memset((copyBuffer+18360),0x54,18360);
 //--image buffer
 
 
