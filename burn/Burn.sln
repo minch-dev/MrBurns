@@ -1,0 +1,20 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Burn", "Burn\Burn.vcxproj", "{69BE5E5A-E970-47DA-9F7D-162B5DF4214A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{69BE5E5A-E970-47DA-9F7D-162B5DF4214A}.Debug|Win32.ActiveCfg = Debug|Win32
+		{69BE5E5A-E970-47DA-9F7D-162B5DF4214A}.Debug|Win32.Build.0 = Debug|Win32
+		{69BE5E5A-E970-47DA-9F7D-162B5DF4214A}.Release|Win32.ActiveCfg = Release|Win32
+		{69BE5E5A-E970-47DA-9F7D-162B5DF4214A}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
