@@ -13,38 +13,37 @@
 
 
 
-
-
 PUCHAR tjtjBuffer = NULL;
 PUCHAR tjtjEnd = NULL;
 PUCHAR imageBuffer = NULL;
 PUCHAR imageEnd = NULL;
-PUCHAR imagePtr = NULL;
 PUCHAR rewrBuffer = NULL;
 PUCHAR rewrEnd = NULL;
-PUCHAR rewrPtr = NULL;
 PUCHAR copyBuffer = NULL;
 PUCHAR copyEnd = NULL;
-PUCHAR dataBuffer = NULL;
+PUCHAR writeBuffer = NULL;
 
-float LBAstart = 0x1C6E2A;
-float LBAend = 0x1D031C;
+float LBAstart = 0x08A051;
+float LBAend = 0x0B8DBB;
+//0x07D5C8 - 0x086ABA 31-32
+//0x1C6E2A - 0x1D031C 51-52
+//0x08A051 - 0x0B8DBB 32-37
 int circle = 105840;	//35280 9696	105840
 int copyLength = 110160;
 int commandLength = 36720;
-int bShift = 0;	//2242 2499
-int q = 0;
+int bShift = 0;	// 2499
+int k = 0;
 PUCHAR i = 0;
 PUCHAR j = 0;
 
 VOID
 Rewrite(int delta)
 {
-	rewrPtr-=delta;
-	if(rewrPtr<rewrBuffer) rewrPtr += circle;
-	if(rewrPtr>rewrEnd) rewrPtr -= circle;
-	memcpy(rewrPtr,imagePtr,1);
-	imagePtr+=1;
+	i-=delta;
+	if(i<rewrBuffer) i += circle;
+	if(i>rewrEnd) i -= circle;
+	memcpy(i,j,1);
+	j+=1;
 }
 
 int
@@ -54,18 +53,13 @@ main(int argc,__nullterminated char *argv[])
 	BOOL status = 0;
 	DWORD accessMode = 0, shareMode = 0;
 	HANDLE fileHandle = NULL;
-	ULONG alignmentMask = 0; // default == выравнивание не надо
+	ULONG alignmentMask = 0;
 	PUCHAR pUnAlignedBuffer = NULL;
-
-//0x07D5C8 - 0x086ABA 31-32
-//0x1C6E2A - 0x1D031C 51-52
-//0x08A051 - 0x0B8DBB 32-37
-//
 
 	SCSI_PASS_THROUGH_WITH_BUFFERS sptwb;
 	SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER sptdwb;
 	CHAR string[25];
-	FILE *ModeSelect10Data;
+	FILE *ModeSelect10Data,*dump,*sample;
 	ULONG	length = 0, errorCode = 0, returned = 0;
 
 	if (argc < 2) {printf("Examples:\n    spti F:");return;}
@@ -95,13 +89,13 @@ main(int argc,__nullterminated char *argv[])
 	}
 
 
-
-	fopen_s(&ModeSelect10Data, "ModeSelect10.bin", "rt" );
+	
+	fopen_s(&ModeSelect10Data, "V:\\ModeSelect10.bin", "rt" );
 	printf("            *****       Mode Select (10)         *****\n");
 
 	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-	dataBuffer = AllocateAlignedBuffer(200,alignmentMask, &pUnAlignedBuffer);
-	fread(dataBuffer, 200, 1, ModeSelect10Data);
+	writeBuffer = AllocateAlignedBuffer(200,alignmentMask, &pUnAlignedBuffer);
+	fread(writeBuffer, 200, 1, ModeSelect10Data);
 
 	sptdwb.sptd.Length = sizeof(SCSI_PASS_THROUGH_DIRECT);
 	sptdwb.sptd.PathId = 0;
@@ -112,7 +106,7 @@ main(int argc,__nullterminated char *argv[])
 	sptdwb.sptd.SenseInfoLength = SPT_SENSE_LENGTH;
 	sptdwb.sptd.DataTransferLength = 200;
 	sptdwb.sptd.TimeOutValue = 65535;
-	sptdwb.sptd.dataBuffer = dataBuffer;
+	sptdwb.sptd.DataBuffer = writeBuffer;
 	sptdwb.sptd.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER,ucSenseBuf);	//0x30
 	sptdwb.sptd.Cdb[0] = SCSIOP_MODE_SELECT10;
 	sptdwb.sptd.Cdb[1] = 16;                         // Data mode
@@ -128,6 +122,8 @@ main(int argc,__nullterminated char *argv[])
 								FALSE);
 
 	PrintStatusResults(status,returned,(PSCSI_PASS_THROUGH_WITH_BUFFERS)&sptdwb,length);
+
+
 
 	printf("            *****       Write         *****\n");
 
@@ -147,16 +143,19 @@ main(int argc,__nullterminated char *argv[])
 	rewrEnd = rewrBuffer + circle;
 	copyBuffer = malloc(copyLength);
 	copyEnd = copyBuffer + copyLength;
-
+	
+	//fopen_s(&dump,"V:\\dump.bin","a+");
+	//fopen_s(&sample, "V:\\sample.bin", "rt" );
 	while (LBAstart <= LBAend){
-		//--gen circle
-		memset(imageBuffer,0x4A,circle);
+	//--gen circle
+		//memset(imageBuffer,0x4A,circle);
+		memset(imageBuffer,0x4A,circle);memset((imageBuffer+(circle/3*2)),0x54,(circle/3));
 
-		//--struct circle
-		i = 0;
-		imagePtr = imageBuffer;
-		rewrPtr = rewrBuffer + bShift;
-		while (i<circle){
+	//--struct circle
+		k = 0;
+		i = rewrBuffer + bShift;
+		j = imageBuffer;
+		while (k<circle){
 			Rewrite(0);
 			Rewrite(73); Rewrite(111);
 			Rewrite(73); Rewrite(111);
@@ -171,22 +170,26 @@ main(int argc,__nullterminated char *argv[])
 			Rewrite(73); Rewrite(111);
 			Rewrite(73); Rewrite(111);
 			Rewrite(73);
-			i+=24;
-			rewrPtr = rewrBuffer + i;
+			k+=24;
+			i = rewrBuffer + k;
 		}
 
-		//rewrite circle to copybuffer with tjtj blocks
+	//--rewrite circle to copybuffer with tjtj blocks
 		i=copyBuffer;
 		j=rewrBuffer;
 		while (i<copyEnd){
 			memcpy(i,j,2352);i+=2352;j+=2352;
 			memcpy(i,tjtjBuffer,96);i+=96;
 		}
+
+	//--sample way
+		//fread(copyBuffer, copyLength, 1, sample);
+
 		//send 3 commands
-		for(i=0;i<3;i++){
+		for(k=0;k<3;k++){
 			ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-			dataBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
-			memcpy(dataBuffer, (copyBuffer + i*commandLength), commandLength);
+			writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
+			memcpy(writeBuffer, (copyBuffer + k*commandLength), commandLength);
 
 			sptdwb.sptd.Length = sizeof(SCSI_PASS_THROUGH_DIRECT);
 			sptdwb.sptd.PathId = 0;
@@ -197,7 +200,7 @@ main(int argc,__nullterminated char *argv[])
 			sptdwb.sptd.DataIn = SCSI_IOCTL_DATA_OUT;
 			sptdwb.sptd.DataTransferLength = commandLength;
 			sptdwb.sptd.TimeOutValue = 5000;
-			sptdwb.sptd.dataBuffer = dataBuffer;
+			sptdwb.sptd.DataBuffer = writeBuffer;
 			sptdwb.sptd.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER,ucSenseBuf);	//0x30
 			sptdwb.sptd.Cdb[0] = SCSIOP_WRITE12;
 		//--LBA
@@ -210,8 +213,10 @@ main(int argc,__nullterminated char *argv[])
 			status = DeviceIoControl(fileHandle,IOCTL_SCSI_PASS_THROUGH_DIRECT,&sptdwb,length,&sptdwb,length,&returned,FALSE);
 			LBAstart+=0xF;
 		}
+		//fwrite(copyBuffer, copyLength, 1, dump);
 	}
-
+	//fclose(dump);
+	//fclose(sample);
 
 	printf("            *****       Start Stop Unit         *****\n");
 
@@ -226,7 +231,7 @@ main(int argc,__nullterminated char *argv[])
 	sptwb.spt.DataIn = 2;	//SCSI_IOCTL_DATA_UNSPECIFIED
 	sptwb.spt.DataTransferLength = 0;
 	sptwb.spt.TimeOutValue = 65535;
-	sptwb.spt.dataBufferOffset = 0;
+	sptwb.spt.DataBufferOffset = 0;
 	sptwb.spt.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucSenseBuf);		//0x30
 	sptwb.spt.Cdb[0] = SCSIOP_START_STOP_UNIT;
 	sptwb.spt.Cdb[4] = 2;
@@ -242,8 +247,6 @@ main(int argc,__nullterminated char *argv[])
 								FALSE);
 
 	PrintStatusResults(status,returned,&sptwb,length);
-
-	if ((sptdwb.sptd.ScsiStatus == 0) && (status != 0)) {	PrintdataBuffer(dataBuffer,sptdwb.sptd.DataTransferLength);	}
 	if (pUnAlignedBuffer != NULL) {
 		free(pUnAlignedBuffer);
 	}
@@ -274,7 +277,7 @@ PrintError(ULONG ErrorCode)
 }
 
 VOID
-PrintdataBuffer(PUCHAR dataBuffer, ULONG BufferLength)
+PrintDataBuffer(PUCHAR DataBuffer, ULONG BufferLength)
 {
 	ULONG Cnt;
 
@@ -284,7 +287,7 @@ PrintdataBuffer(PUCHAR dataBuffer, ULONG BufferLength)
 		if ((Cnt) % 16 == 0) {
 			printf(" %03X  ",Cnt);
 			}
-		printf("%02X  ", dataBuffer[Cnt]);
+		printf("%02X  ", DataBuffer[Cnt]);
 		if ((Cnt+1) % 8 == 0) {
 			printf(" ");
 			}
@@ -346,7 +349,7 @@ PrintStatusResults(
 			psptwb->spt.ScsiStatus,returned);
 		printf("Data buffer length: %Xh\n\n\n",
 			psptwb->spt.DataTransferLength);
-		PrintdataBuffer((PUCHAR)psptwb,length);
+		PrintDataBuffer((PUCHAR)psptwb,length);
 		}
 }
 
