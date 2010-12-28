@@ -11,92 +11,54 @@
 #include "burn.h"
 #include <math.h>
 
-
-
 PUCHAR tjtjBuffer = NULL;
 PUCHAR tjtjEnd = NULL;
-PUCHAR imageBuffer = NULL;
-PUCHAR imageEnd = NULL;
-PUCHAR rewrBuffer = NULL;
-PUCHAR rewrEnd = NULL;
+PUCHAR dumpBuffer = NULL;
+PUCHAR dumpEnd = NULL;
+PUCHAR structBuffer = NULL;
+PUCHAR structEnd = NULL;
 PUCHAR copyBuffer = NULL;
 PUCHAR copyEnd = NULL;
 PUCHAR writeBuffer = NULL;
+int rawLength = 35280;
+int dumpLength = 0;
+int copyLength = 0;
+int commandLength = 36720;
+int circleLength = 105840;
+int commandsNum = 0;
 
-float LBAstart = 0x08A051;
-float LBAend = 0x0B8DBB;
+BOOL status = 0;
+DWORD accessMode = 0, shareMode = 0;
+HANDLE fileHandle = NULL;
+ULONG alignmentMask = 0;
+PUCHAR pUnAlignedBuffer = NULL;
+
+SCSI_PASS_THROUGH_WITH_BUFFERS sptwb;
+SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER sptdwb;
+CHAR string[25];
+FILE *ModeSelect10Data,*dump,*sample;
+ULONG	length = 0, errorCode = 0, returned = 0;
+
+float LBAstart = 0x07D5C8;
+float LBAend = 0x086ABA;
 //0x07D5C8 - 0x086ABA 31-32
+//0x07D5C8 - 0x08FFAC 31-33
 //0x1C6E2A - 0x1D031C 51-52
 //0x08A051 - 0x0B8DBB 32-37
-int circle = 105840;	//35280 9696	105840
-int copyLength = 110160;
-int commandLength = 36720;
-int bShift = 0;	// 2499
+int byteShift = 0;
+int array[24]={71,73,111,73,111,73,133,73,111,73,111,73,469,73,111,73,111,73,133,73,111,73,111,73};
 int k = 0;
 PUCHAR i = 0;
 PUCHAR j = 0;
 
-VOID
-Rewrite(int delta)
-{
-	i-=delta;
-	if(i<rewrBuffer) i += circle;
-	if(i>rewrEnd) i -= circle;
-	memcpy(i,j,1);
-	j+=1;
-}
-
-int
-__cdecl
-main(int argc,__nullterminated char *argv[])
-{
-	BOOL status = 0;
-	DWORD accessMode = 0, shareMode = 0;
-	HANDLE fileHandle = NULL;
-	ULONG alignmentMask = 0;
-	PUCHAR pUnAlignedBuffer = NULL;
-
-	SCSI_PASS_THROUGH_WITH_BUFFERS sptwb;
-	SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER sptdwb;
-	CHAR string[25];
-	FILE *ModeSelect10Data,*dump,*sample;
-	ULONG	length = 0, errorCode = 0, returned = 0;
-
-	if (argc < 2) {printf("Examples:\n    spti F:");return;}
-
-	StringCbPrintf(string, sizeof(string), "\\\\.\\%s", argv[1]);
-	shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
-	accessMode = GENERIC_WRITE | GENERIC_READ;
-
-	fileHandle = CreateFile(string, accessMode, shareMode, NULL, OPEN_EXISTING, 0, NULL);
-	if (fileHandle == INVALID_HANDLE_VALUE) {
-		errorCode = GetLastError();
-		printf("Error opening %s. Error: %d\n", string, errorCode);
-		PrintError(errorCode);
-		return;
-	}
-
-	// узнаём параметры устройства и "маску выравнивания"
-	status = GetAlignmentMaskForDevice(fileHandle, &alignmentMask);
-
-	//если не удаётся запросить параметры устройства - ошибка
-	if (!status ) {
-		errorCode = GetLastError();
-		printf("Error getting device and/or adapter properties; error was %d\n", errorCode);
-		PrintError(errorCode);
-		CloseHandle(fileHandle);
-		return;
-	}
-
-
-	
-	fopen_s(&ModeSelect10Data, "V:\\ModeSelect10.bin", "rt" );
+void modeSelect(){
+	fopen_s(&ModeSelect10Data, "V:\\ModeSelect10.bin", "rb" );
 	printf("            *****       Mode Select (10)         *****\n");
 
 	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
 	writeBuffer = AllocateAlignedBuffer(200,alignmentMask, &pUnAlignedBuffer);
 	fread(writeBuffer, 200, 1, ModeSelect10Data);
-
+	fclose(ModeSelect10Data);
 	sptdwb.sptd.Length = sizeof(SCSI_PASS_THROUGH_DIRECT);
 	sptdwb.sptd.PathId = 0;
 	sptdwb.sptd.TargetId = 1;
@@ -122,74 +84,8 @@ main(int argc,__nullterminated char *argv[])
 								FALSE);
 
 	PrintStatusResults(status,returned,(PSCSI_PASS_THROUGH_WITH_BUFFERS)&sptdwb,length);
-
-
-
-	printf("            *****       Write         *****\n");
-
-//--tjtjBuffer
-	tjtjBuffer = malloc(96);
-	i = tjtjBuffer;
-	tjtjEnd = tjtjBuffer+96;
-	memset(i, 0x54, 1);i++;
-	memset(i, 0x4A, 1);i++;
-	while (i<tjtjEnd){	memcpy(i, tjtjBuffer, 2);i+=2;	}
-	i = 0;
-
-//--buffers
-	imageBuffer = malloc(circle);
-	imageEnd = imageBuffer + circle;
-	rewrBuffer = malloc(circle);
-	rewrEnd = rewrBuffer + circle;
-	copyBuffer = malloc(copyLength);
-	copyEnd = copyBuffer + copyLength;
-	
-	//fopen_s(&dump,"V:\\dump.bin","a+");
-	//fopen_s(&sample, "V:\\sample.bin", "rt" );
-	while (LBAstart <= LBAend){
-	//--gen circle
-		//memset(imageBuffer,0x4A,circle);
-		memset(imageBuffer,0x4A,circle);memset((imageBuffer+(circle/3*2)),0x54,(circle/3));
-
-	//--struct circle
-		k = 0;
-		i = rewrBuffer + bShift;
-		j = imageBuffer;
-		while (k<circle){
-			Rewrite(0);
-			Rewrite(73); Rewrite(111);
-			Rewrite(73); Rewrite(111);
-			Rewrite(73); Rewrite(133);
-			Rewrite(73); Rewrite(111);
-			Rewrite(73); Rewrite(111);
-			Rewrite(73);
-			Rewrite(469);
-			Rewrite(73); Rewrite(111);
-			Rewrite(73); Rewrite(111);
-			Rewrite(73); Rewrite(133);
-			Rewrite(73); Rewrite(111);
-			Rewrite(73); Rewrite(111);
-			Rewrite(73);
-			k+=24;
-			i = rewrBuffer + k;
-		}
-
-	//--rewrite circle to copybuffer with tjtj blocks
-		i=copyBuffer;
-		j=rewrBuffer;
-		while (i<copyEnd){
-			memcpy(i,j,2352);i+=2352;j+=2352;
-			memcpy(i,tjtjBuffer,96);i+=96;
-		}
-
-	//--sample way
-		//fread(copyBuffer, copyLength, 1, sample);
-
-		//send 3 commands
-		for(k=0;k<3;k++){
-			ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-			writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
-			memcpy(writeBuffer, (copyBuffer + k*commandLength), commandLength);
+}
+void modeWrite(){
 
 			sptdwb.sptd.Length = sizeof(SCSI_PASS_THROUGH_DIRECT);
 			sptdwb.sptd.PathId = 0;
@@ -211,13 +107,39 @@ main(int argc,__nullterminated char *argv[])
 			sptdwb.sptd.Cdb[9] = 0x0F;
 			length = sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER);
 			status = DeviceIoControl(fileHandle,IOCTL_SCSI_PASS_THROUGH_DIRECT,&sptdwb,length,&sptdwb,length,&returned,FALSE);
-			LBAstart+=0xF;
-		}
-		//fwrite(copyBuffer, copyLength, 1, dump);
-	}
-	//fclose(dump);
-	//fclose(sample);
+}
+void preventAllowMediumRemoval(){
+	printf("            *****     Prevent Allow Medium Removal       *****\n");
 
+	ZeroMemory(&sptwb,sizeof(SCSI_PASS_THROUGH_WITH_BUFFERS));
+
+	sptwb.spt.Length = sizeof(SCSI_PASS_THROUGH);
+	sptwb.spt.PathId = 0;
+	sptwb.spt.TargetId = 0;
+	sptwb.spt.Lun = 0;
+	sptwb.spt.CdbLength = CDB6GENERIC_LENGTH;
+	sptwb.spt.SenseInfoLength = 32;	//SPT_SENSE_LENGTH
+	sptwb.spt.DataIn = 2;	//SCSI_IOCTL_DATA_UNSPECIFIED
+	sptwb.spt.DataTransferLength = 0;
+	sptwb.spt.TimeOutValue = 65535;
+	sptwb.spt.DataBufferOffset = 0;
+	sptwb.spt.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucSenseBuf);		//0x30
+	sptdwb.sptd.Cdb[0] = 0x1E;
+
+	length = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucDataBuf);
+
+	status = DeviceIoControl(fileHandle,
+								IOCTL_SCSI_PASS_THROUGH,
+								&sptwb,
+								sizeof(SCSI_PASS_THROUGH),
+								&sptwb,
+								length,
+								&returned,
+								FALSE);
+
+	PrintStatusResults(status,returned,&sptwb,length);
+}
+void startStopUnit(){
 	printf("            *****       Start Stop Unit         *****\n");
 
 	ZeroMemory(&sptwb,sizeof(SCSI_PASS_THROUGH_WITH_BUFFERS));
@@ -247,10 +169,158 @@ main(int argc,__nullterminated char *argv[])
 								FALSE);
 
 	PrintStatusResults(status,returned,&sptwb,length);
+}
+void testUnitReady(){
+	printf("            *****       Test Unit Ready         *****\n");
+
+	ZeroMemory(&sptwb,sizeof(SCSI_PASS_THROUGH_WITH_BUFFERS));
+
+	sptwb.spt.Length = sizeof(SCSI_PASS_THROUGH);
+	sptwb.spt.PathId = 0;
+	sptwb.spt.TargetId = 1;
+	sptwb.spt.Lun = 0;
+	sptwb.spt.CdbLength = CDB6GENERIC_LENGTH;
+	sptwb.spt.SenseInfoLength = 32;	//SPT_SENSE_LENGTH
+	sptwb.spt.DataIn = 2;	//SCSI_IOCTL_DATA_UNSPECIFIED
+	sptwb.spt.DataTransferLength = 0;
+	sptwb.spt.TimeOutValue = 65535;
+	sptwb.spt.DataBufferOffset = 0;
+	sptwb.spt.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucSenseBuf);		//0x30
+
+	length = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucDataBuf);
+
+	status = DeviceIoControl(fileHandle,
+								IOCTL_SCSI_PASS_THROUGH,
+								&sptwb,
+								sizeof(SCSI_PASS_THROUGH),
+								&sptwb,
+								length,
+								&returned,
+								FALSE);
+
+	PrintStatusResults(status,returned,&sptwb,length);
+}
+
+int
+__cdecl
+main(int argc,__nullterminated char *argv[])
+{
+	if (argc < 2) {printf("Examples:\n    spti F:");return;}
+	StringCbPrintf(string, sizeof(string), "\\\\.\\%s", argv[1]);
+	shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+	accessMode = GENERIC_WRITE | GENERIC_READ;
+
+//--открываем привод
+	fileHandle = CreateFile(string, accessMode, shareMode, NULL, OPEN_EXISTING, 0, NULL);
+	if (fileHandle == INVALID_HANDLE_VALUE) {
+		errorCode = GetLastError();
+		printf("Error opening %s. Error: %d\n", string, errorCode);
+		PrintError(errorCode);
+		return;
+	}
+
+//--узнаём параметры устройства и маску выравнивания
+	status = GetAlignmentMaskForDevice(fileHandle, &alignmentMask);
+
+//--если не удаётся запросить параметры устройства - ошибка
+	if (!status ) {
+		errorCode = GetLastError();
+		printf("Error getting device and/or adapter properties; error was %d\n", errorCode);
+		PrintError(errorCode);
+		CloseHandle(fileHandle);
+		return;
+	}
+
+//--выбираем режим
+	modeSelect();
+
+//--tjtjBuffer
+	tjtjBuffer = malloc(96);
+	i = tjtjBuffer;
+	tjtjEnd = tjtjBuffer+96;
+	memset(i, 0x54, 1);i++;
+	memset(i, 0x4A, 1);i++;
+	while (i<tjtjEnd){	memcpy(i, tjtjBuffer, 2);i+=2;	}
+	i = 0;
+
+//--buffers
+	commandsNum = 3*((int)(((LBAend - LBAstart)/0x0F)/3));
+
+	LBAend = LBAstart + (commandsNum*0x0F);
+	dumpLength = commandsNum * rawLength;
+	dumpBuffer = malloc(dumpLength);
+	dumpEnd = dumpBuffer + dumpLength;
+	structBuffer = malloc(dumpLength);
+	structEnd = structBuffer + dumpLength;
+	copyLength = commandsNum * commandLength;
+	copyBuffer = malloc(copyLength);
+	copyEnd = copyBuffer + copyLength;
+
+//--test
+	//printf("commandsNum %d %d %d", commandsNum);
+
+//--gen dump
+	memset(dumpBuffer,0x4A,circleLength);
+	memset((dumpBuffer+rawLength),0x54,rawLength);
+	i = dumpBuffer + circleLength;
+	while(i<dumpEnd){
+		memcpy(i, dumpBuffer, circleLength);
+		i += circleLength;
+	}
+//--test struct function
+	//fopen_s(&sample,"V:\\24_signs_from off00_was.bin","rb"); fread(dumpBuffer, 2352, 1, sample); fclose(sample);
+	//i = dumpBuffer+264;k=0x00;		while(k<=0xff){	memset(i,k,1); i+=1;k+=0x01;	}
+	
+//--struct dump
+	for(k=0;k<24;k++){
+		byteShift-=array[k];
+		i = structBuffer + byteShift;
+		j = dumpBuffer + k;
+		while(i<structEnd){
+			if(i>=structBuffer) memcpy(i,j,1);
+			if(j>=dumpEnd) memset(i,0x4A,1);
+			i+=24;
+			j+=24;
+		}
+	}
+
+
+//--rewrite struct to copybuffer with tjtj blocks
+	i=copyBuffer;
+	j=structBuffer;
+	while (i<copyEnd){
+		memcpy(i,j,2352);i+=2352;j+=2352;
+		memcpy(i,tjtjBuffer,96);i+=96;
+	}
+
+//--tests
+	//fopen_s(&dump,"V:\\dump.bin","wb");fwrite(copyBuffer, copyLength, 1, dump);fclose(dump);
+
+//--write desu
+	printf("            *****       Fukken WRITE         *****\n");
+	i = copyBuffer;
+	while (LBAstart < LBAend){
+		ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
+		writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
+		memcpy(writeBuffer, i, commandLength);
+		modeWrite();
+		LBAstart += 0xF;
+		i += commandLength;
+	}
+//--stop
+	k=0;
+	while(k < 10){
+		testUnitReady();
+		if(sptwb.spt.ScsiStatus == 0) break;
+		k++;
+	}
+	preventAllowMediumRemoval();
+	startStopUnit();
+
+//--clean
 	if (pUnAlignedBuffer != NULL) {
 		free(pUnAlignedBuffer);
 	}
-
 	CloseHandle(fileHandle);
 }
 
