@@ -9,64 +9,28 @@
 #include <intsafe.h>
 #include <string.h>
 #include <math.h>
-PUCHAR imageBuffer = NULL;
-PUCHAR imageEnd = NULL;
-PUCHAR imagePtr = NULL;
-PUCHAR rewrBuffer = NULL;
-PUCHAR rewrEnd = NULL;
-PUCHAR rewrPtr = NULL;
-int bSize = 105840;//35280 9696	105840
-int bShift = 0; //2242 2499
+int writeLinear[24];
+int readLinear[24]={71,73,111,73,111,73,133,73,111,73,111,73,469,73,111,73,111,73,133,73,111,73,111,73};
 int i = 0;
-
-VOID
-Rewrite(int delta)
-{
-rewrPtr-=delta;
-if(rewrPtr<rewrBuffer) rewrPtr += bSize;
-if(rewrPtr>rewrEnd) rewrPtr -= bSize;
-memcpy(rewrPtr,imagePtr,1);
-imagePtr+=1;
-}
-
+int j = 0;
+int k = 0;
+int byteShift = 0;
 int main()
 {
-FILE *file,*bin;
-imageBuffer = malloc(bSize);
-imageEnd = imageBuffer + bSize; 
-imagePtr = imageBuffer;
-//fopen_s(&bin,"was.bin","r");fread(imageBuffer, sizeof(byte), bSize, bin);fclose(bin);
-memset(imageBuffer,0x4A,bSize);memset((imageBuffer+(bSize/3*2)),0x54,(bSize/3));
 
-rewrBuffer = malloc(bSize);
-rewrEnd = rewrBuffer + bSize;
-rewrPtr = rewrBuffer + bShift;
-
-while (i<bSize){
-
-Rewrite(0);
-Rewrite(73); Rewrite(111);
-Rewrite(73); Rewrite(111);
-Rewrite(73); Rewrite(133);
-Rewrite(73); Rewrite(111);
-Rewrite(73); Rewrite(111);
-Rewrite(73);
-Rewrite(469);
-Rewrite(73); Rewrite(111);
-Rewrite(73); Rewrite(111);
-Rewrite(73); Rewrite(133);
-Rewrite(73); Rewrite(111);
-Rewrite(73); Rewrite(111);
-Rewrite(73);
-i+=24;
-rewrPtr = rewrBuffer + i;
+for(k=0;k<24;k++){
+	byteShift-=readLinear[k];
+	i = byteShift;j = k;
+	while(i<5000){
+		if(i>=0){
+			writeLinear[i]=j;
+			break;
+		}
+		i+=24;j+=24;
+	}
 }
-
-fopen_s(&file,"file.txt","w");
-fwrite(rewrBuffer, bSize, 1, file);
-//fwrite(imageBuffer, bSize, 1, file);
-fclose(file);
-
+for(k=0;k<24;k++){
+	printf("%d, ",writeLinear[k]);
+}
 return 0;
-
 }
