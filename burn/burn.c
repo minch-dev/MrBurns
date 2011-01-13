@@ -4,28 +4,22 @@
 #include <ntddscsi.h>
 #include <stdio.h>
 #include <stddef.h>
-#include <stdlib.h>
+#include <stdlib.h> //free()
 #include <strsafe.h>
 #include <intsafe.h>
 #include <string.h>
 #include "burn.h"
 #include <math.h>
 
-PUCHAR tjtjBuffer = NULL;
-PUCHAR tjtjEnd = NULL;
-PUCHAR dumpBuffer = NULL;
-PUCHAR dumpEnd = NULL;
-PUCHAR structBuffer = NULL;
-PUCHAR structEnd = NULL;
-PUCHAR copyBuffer = NULL;
-PUCHAR copyEnd = NULL;
+PUCHAR tjtjBuffer = NULL, tjtjEnd = NULL;
+PUCHAR dumpBuffer = NULL, dumpEnd = NULL;
+PUCHAR copyBuffer, copyEnd = NULL;
 PUCHAR writeBuffer = NULL;
+
+int dumpLength = 0, copyLength = 0, commandsNum = 0;
 int rawLength = 35280;
-int dumpLength = 0;
-int copyLength = 0;
 int commandLength = 36720;
 int circleLength = 105840;
-int commandsNum = 0;
 
 BOOL status = 0;
 DWORD accessMode = 0, shareMode = 0;
@@ -36,23 +30,91 @@ PUCHAR pUnAlignedBuffer = NULL;
 SCSI_PASS_THROUGH_WITH_BUFFERS sptwb;
 SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER sptdwb;
 CHAR string[25];
-FILE *ModeSelect10Data,*dump,*sample;
 ULONG	length = 0, errorCode = 0, returned = 0;
 
-float LBAstart = 0x07D5C8;
-float LBAend = 0x086ABA;
+int writeLinear[24]={145,71,725,651,1641,1567,2221,2147,331,257,911,837,1827,1753,2407,2333,517,443,1097,1023,2013,1939,2593,2519};
+UCHAR customCdb[16];
+FILE *ModeSelect10Data,*dump,*sample;
+
+int k = 0;
+int m = 0;
+int n = 0;
+PUCHAR i = 0;
+PUCHAR j = 0;
+const float PI = 3.14159265358979323846f;
+
+int LBA[33]={0x039D96, 0x04418B, 0x04EBEE, 0x059CC0, 0x0653FF, 0x0711AD, 0x07D5C8, 0x08A051, 0x097149, 0x0A48AE, 0x0B2682, 0x0C0AC3, 0x0CF572, 0x0DE690, 0x0EDE1B, 0x0FDC15, 0x10E07C, 0x11EB52, 0x12FC95, 0x141447, 0x153267, 0x1556F4, 0x1781F0, 0x18B359, 0x19EB31, 0x1B2977, 0x1C6E2A, 0x1DB94C, 0x1F0ADB, 0x2062d9, 0x21C145, 0x23261F, 0x249166};
+int LBAstart;
+float rStart = 26;
+
+//0x039D96 - 0x039DF0 6 commands
+//0x039D96 - 0x03AB88 25-25.1
 //0x07D5C8 - 0x086ABA 31-32
 //0x07D5C8 - 0x08FFAC 31-33
 //0x1C6E2A - 0x1D031C 51-52
 //0x08A051 - 0x0B8DBB 32-37
-int byteShift = 0;
-int array[24]={71,73,111,73,111,73,133,73,111,73,111,73,469,73,111,73,111,73,133,73,111,73,111,73};
-int k = 0;
-PUCHAR i = 0;
-PUCHAR j = 0;
 
+//--GrayCode variables
+int linesPerMm = 3413;	//	3413
+int partsNumber, partsWidth, partsOffset, partsShift;
+int trackWidth, grayCodeBits = 13;
+float partsRawWidth,
+	raidSize = 0.96923f,
+	floorHalf = 0.5f;
+float trackRawWidth;
+
+void zeroArray(){	for (m=0;m>16;m++)customCdb[m]=0;	}
+void sptwbCommand(UCHAR CdbLength, UCHAR SenseInfoLength, UCHAR DataIn, ULONG DataTransferLength, ULONG TimeOutValue, UCHAR Cdb[16]	)
+{
+	ZeroMemory(&sptwb,sizeof(SCSI_PASS_THROUGH_WITH_BUFFERS));
+	sptwb.spt.Length = sizeof(SCSI_PASS_THROUGH);
+	sptwb.spt.PathId = 0;
+	sptwb.spt.TargetId = 1;
+	sptwb.spt.Lun = 0;
+	sptwb.spt.CdbLength = CdbLength;
+	sptwb.spt.SenseInfoLength = SenseInfoLength;
+	sptwb.spt.DataIn = DataIn;
+	sptwb.spt.DataTransferLength = DataTransferLength;
+	sptwb.spt.TimeOutValue = TimeOutValue;
+	sptwb.spt.DataBufferOffset = 0;
+	sptwb.spt.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucSenseBuf);		//0x30
+	sptwb.spt.Cdb[0] = Cdb[0];
+	sptwb.spt.Cdb[1] = Cdb[1];
+	sptwb.spt.Cdb[2] = Cdb[2];
+	sptwb.spt.Cdb[3] = Cdb[3];
+	sptwb.spt.Cdb[4] = Cdb[4];
+	sptwb.spt.Cdb[5] = Cdb[5];
+	if(CdbLength>6){
+		sptwb.spt.Cdb[6] = Cdb[6];
+		sptwb.spt.Cdb[7] = Cdb[7];
+		sptwb.spt.Cdb[8] = Cdb[8];
+		sptwb.spt.Cdb[9] = Cdb[9];
+	}
+	if(CdbLength>10){
+		sptwb.spt.Cdb[10] = Cdb[10];
+		sptwb.spt.Cdb[11] = Cdb[11];
+	}
+	if(CdbLength>12){
+		sptwb.spt.Cdb[12] = Cdb[12];
+		sptwb.spt.Cdb[13] = Cdb[13];
+		sptwb.spt.Cdb[14] = Cdb[14];
+		sptwb.spt.Cdb[15] = Cdb[15];
+	}
+	length = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucDataBuf);
+
+	status = DeviceIoControl(fileHandle,
+								IOCTL_SCSI_PASS_THROUGH,
+								&sptwb,
+								sizeof(SCSI_PASS_THROUGH),
+								&sptwb,
+								length,
+								&returned,
+								FALSE);
+
+	PrintStatusResults(status,returned,&sptwb,length);
+}
 void modeSelect(){
-	fopen_s(&ModeSelect10Data, "V:\\ModeSelect10.bin", "rb" );
+	fopen_s(&ModeSelect10Data, "V:\\ModeSelect10HIGH.bin", "rb" );
 	printf("            *****       Mode Select (10)         *****\n");
 
 	ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
@@ -108,104 +170,41 @@ void modeWrite(){
 			length = sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER);
 			status = DeviceIoControl(fileHandle,IOCTL_SCSI_PASS_THROUGH_DIRECT,&sptdwb,length,&sptdwb,length,&returned,FALSE);
 }
+void synchronizeCache(){
+	printf("            *****     Synchronize Cache       *****\n");
+	zeroArray();
+	customCdb[0] = 0x35;
+	sptwbCommand(10,32,2,0,65535,customCdb);
+}
 void preventAllowMediumRemoval(){
 	printf("            *****     Prevent Allow Medium Removal       *****\n");
-
-	ZeroMemory(&sptwb,sizeof(SCSI_PASS_THROUGH_WITH_BUFFERS));
-
-	sptwb.spt.Length = sizeof(SCSI_PASS_THROUGH);
-	sptwb.spt.PathId = 0;
-	sptwb.spt.TargetId = 0;
-	sptwb.spt.Lun = 0;
-	sptwb.spt.CdbLength = CDB6GENERIC_LENGTH;
-	sptwb.spt.SenseInfoLength = 32;	//SPT_SENSE_LENGTH
-	sptwb.spt.DataIn = 2;	//SCSI_IOCTL_DATA_UNSPECIFIED
-	sptwb.spt.DataTransferLength = 0;
-	sptwb.spt.TimeOutValue = 65535;
-	sptwb.spt.DataBufferOffset = 0;
-	sptwb.spt.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucSenseBuf);		//0x30
-	sptdwb.sptd.Cdb[0] = 0x1E;
-
-	length = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucDataBuf);
-
-	status = DeviceIoControl(fileHandle,
-								IOCTL_SCSI_PASS_THROUGH,
-								&sptwb,
-								sizeof(SCSI_PASS_THROUGH),
-								&sptwb,
-								length,
-								&returned,
-								FALSE);
-
-	PrintStatusResults(status,returned,&sptwb,length);
+	zeroArray();
+	customCdb[0] = 0x1E;
+	sptwbCommand(CDB6GENERIC_LENGTH,32,2,0,65535,customCdb);
 }
 void startStopUnit(){
 	printf("            *****       Start Stop Unit         *****\n");
-
-	ZeroMemory(&sptwb,sizeof(SCSI_PASS_THROUGH_WITH_BUFFERS));
-
-	sptwb.spt.Length = sizeof(SCSI_PASS_THROUGH);
-	sptwb.spt.PathId = 0;
-	sptwb.spt.TargetId = 1;
-	sptwb.spt.Lun = 0;
-	sptwb.spt.CdbLength = CDB6GENERIC_LENGTH;
-	sptwb.spt.SenseInfoLength = 32;	//SPT_SENSE_LENGTH
-	sptwb.spt.DataIn = 2;	//SCSI_IOCTL_DATA_UNSPECIFIED
-	sptwb.spt.DataTransferLength = 0;
-	sptwb.spt.TimeOutValue = 65535;
-	sptwb.spt.DataBufferOffset = 0;
-	sptwb.spt.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucSenseBuf);		//0x30
-	sptwb.spt.Cdb[0] = SCSIOP_START_STOP_UNIT;
-	sptwb.spt.Cdb[4] = 2;
-	length = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucDataBuf);
-
-	status = DeviceIoControl(fileHandle,
-								IOCTL_SCSI_PASS_THROUGH,
-								&sptwb,
-								sizeof(SCSI_PASS_THROUGH),
-								&sptwb,
-								length,
-								&returned,
-								FALSE);
-
-	PrintStatusResults(status,returned,&sptwb,length);
+	zeroArray();
+	customCdb[0] = SCSIOP_START_STOP_UNIT;
+	customCdb[4] = 2;
+	sptwbCommand(CDB6GENERIC_LENGTH,32,2,0,65535,customCdb);
 }
 void testUnitReady(){
 	printf("            *****       Test Unit Ready         *****\n");
-
-	ZeroMemory(&sptwb,sizeof(SCSI_PASS_THROUGH_WITH_BUFFERS));
-
-	sptwb.spt.Length = sizeof(SCSI_PASS_THROUGH);
-	sptwb.spt.PathId = 0;
-	sptwb.spt.TargetId = 1;
-	sptwb.spt.Lun = 0;
-	sptwb.spt.CdbLength = CDB6GENERIC_LENGTH;
-	sptwb.spt.SenseInfoLength = 32;	//SPT_SENSE_LENGTH
-	sptwb.spt.DataIn = 2;	//SCSI_IOCTL_DATA_UNSPECIFIED
-	sptwb.spt.DataTransferLength = 0;
-	sptwb.spt.TimeOutValue = 65535;
-	sptwb.spt.DataBufferOffset = 0;
-	sptwb.spt.SenseInfoOffset = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucSenseBuf);		//0x30
-
-	length = offsetof(SCSI_PASS_THROUGH_WITH_BUFFERS,ucDataBuf);
-
-	status = DeviceIoControl(fileHandle,
-								IOCTL_SCSI_PASS_THROUGH,
-								&sptwb,
-								sizeof(SCSI_PASS_THROUGH),
-								&sptwb,
-								length,
-								&returned,
-								FALSE);
-
-	PrintStatusResults(status,returned,&sptwb,length);
+	zeroArray();
+	customCdb[0] = 0;
+	sptwbCommand(CDB6GENERIC_LENGTH,32,2,0,65535,customCdb);
 }
 
 int
 __cdecl
 main(int argc,__nullterminated char *argv[])
 {
-	if (argc < 2) {printf("Examples:\n    spti F:");return;}
+	if (argc < 2) {
+		//printf("Examples:\n    spti F:");
+		argv[1] = "F:";
+		//return;
+	}
 	StringCbPrintf(string, sizeof(string), "\\\\.\\%s", argv[1]);
 	shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
 	accessMode = GENERIC_WRITE | GENERIC_READ;
@@ -241,86 +240,93 @@ main(int argc,__nullterminated char *argv[])
 	memset(i, 0x54, 1);i++;
 	memset(i, 0x4A, 1);i++;
 	while (i<tjtjEnd){	memcpy(i, tjtjBuffer, 2);i+=2;	}
-	i = 0;
+	//for(i;i<tjtjEnd;i+=2)memcpy(i, tjtjBuffer, 2);
 
 //--buffers
-	commandsNum = 3*((int)(((LBAend - LBAstart)/0x0F)/3));
-
-	LBAend = LBAstart + (commandsNum*0x0F);
-	dumpLength = commandsNum * rawLength;
+	dumpLength = circleLength *2;
 	dumpBuffer = malloc(dumpLength);
-	dumpEnd = dumpBuffer + dumpLength;
-	structBuffer = malloc(dumpLength);
-	structEnd = structBuffer + dumpLength;
-	copyLength = commandsNum * commandLength;
+	dumpEnd = dumpBuffer + circleLength;
+
+	copyLength = commandLength * 3;
 	copyBuffer = malloc(copyLength);
 	copyEnd = copyBuffer + copyLength;
 
-//--test
-	//printf("commandsNum %d %d %d", commandsNum);
+	LBAstart = LBA[(int)(rStart-25)];
+	//trackRawWidth = linesPerMm * (raidSize /6);
+	trackRawWidth = linesPerMm * 6*PI*rStart/(4096 - 3*PI*15);
+	trackWidth = (int)(floorHalf + trackRawWidth);
+	commandsNum = trackWidth*3;
 
-//--gen dump
-	memset(dumpBuffer,0x4A,circleLength);
-	memset((dumpBuffer+rawLength),0x54,rawLength);
-	i = dumpBuffer + circleLength;
-	while(i<dumpEnd){
-		memcpy(i, dumpBuffer, circleLength);
-		i += circleLength;
-	}
-//--test struct function
-	//fopen_s(&sample,"V:\\24_signs_from off00_was.bin","rb"); fread(dumpBuffer, 2352, 1, sample); fclose(sample);
-	//i = dumpBuffer+264;k=0x00;		while(k<=0xff){	memset(i,k,1); i+=1;k+=0x01;	}
-	
-//--struct dump
-	for(k=0;k<24;k++){
-		byteShift-=array[k];
-		i = structBuffer + byteShift;
-		j = dumpBuffer + k;
-		while(i<structEnd){
-			if(i>=structBuffer) memcpy(i,j,1);
-			if(j>=dumpEnd) memset(i,0x4A,1);
-			i+=24;
-			j+=24;
+	for (n=0;n<grayCodeBits;n++){
+
+	//--gen dump
+		partsNumber = (int)pow(2,n);
+		if(n==0) partsNumber = 2;
+		partsRawWidth = (float) circleLength / partsNumber;
+		partsShift = (int)(floorHalf + (partsRawWidth/2));
+		if(n==0) partsShift = 0;
+		memset(dumpBuffer,0x4A,circleLength);
+		for(k=0;k<partsNumber;k+=2){
+			partsOffset = (int)((k* partsRawWidth)+floorHalf);
+			partsWidth = (int)(((k+1)*partsRawWidth)+floorHalf) - partsOffset;
+			partsOffset += partsShift; 
+			memset( (dumpBuffer+partsOffset), 0x54, partsWidth);
 		}
+		memcpy(dumpBuffer + circleLength, dumpBuffer, circleLength);
+
+	//--tests
+		//fopen_s(&dump,"V:\\dump.bin","wb+"); if(n==0)fwrite(dumpBuffer, circleLength, 1, dump); fclose(dump);
+	//--struct dump
+		i = dumpBuffer;	j = dumpBuffer;	k = 0;
+		while(i<dumpEnd){
+			j = i + writeLinear[k];		//if(j>=dumpEnd) memset(i,0x4A,1); else memcpy(i,j,1);
+			memcpy(i,j,1);
+			i++;k++;if(k>23)k=0;
+		}
+	
+	//--rewrite structed dump to copybuffer with tjtj blocks
+		i=copyBuffer;	j=dumpBuffer;
+		while (i<copyEnd){
+			memcpy(i,j,2352);i+=2352;j+=2352;
+			memcpy(i,tjtjBuffer,96);i+=96;
+		}
+		//free(dumpBuffer);
+
+	//--write desu
+		printf("            *****       Fukken WRITE         *****\n");
+		i = copyBuffer;
+		if(n==(grayCodeBits - 2)) commandsNum*=2;
+		for(k=0;k<commandsNum;k++){
+			ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
+			writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
+			memcpy(writeBuffer, i, commandLength);
+			modeWrite();
+			free(writeBuffer);
+			LBAstart += 0xF;
+			i += commandLength;
+			if(i>=copyEnd) i=copyBuffer;
+		}
+	
 	}
 
 
-//--rewrite struct to copybuffer with tjtj blocks
-	i=copyBuffer;
-	j=structBuffer;
-	while (i<copyEnd){
-		memcpy(i,j,2352);i+=2352;j+=2352;
-		memcpy(i,tjtjBuffer,96);i+=96;
-	}
-
-//--tests
-	//fopen_s(&dump,"V:\\dump.bin","wb");fwrite(copyBuffer, copyLength, 1, dump);fclose(dump);
-
-//--write desu
-	printf("            *****       Fukken WRITE         *****\n");
-	i = copyBuffer;
-	while (LBAstart < LBAend){
-		ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
-		writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
-		memcpy(writeBuffer, i, commandLength);
-		modeWrite();
-		LBAstart += 0xF;
-		i += commandLength;
-	}
 //--stop
-	k=0;
-	while(k < 10){
+	synchronizeCache();
+	for(k=0;k<10;k++){
 		testUnitReady();
 		if(sptwb.spt.ScsiStatus == 0) break;
-		k++;
+		Sleep(20);
 	}
 	preventAllowMediumRemoval();
-	startStopUnit();
+	for(k=0;k<10;k++){
+		startStopUnit();
+		if(sptwb.spt.ScsiStatus == 0) break;
+		Sleep(50);
+	}
+
 
 //--clean
-	if (pUnAlignedBuffer != NULL) {
-		free(pUnAlignedBuffer);
-	}
+	//if (pUnAlignedBuffer != NULL) free(pUnAlignedBuffer);
 	CloseHandle(fileHandle);
 }
 
@@ -572,3 +578,17 @@ Cleanup:
 	return (!failed);
 
 }
+
+/*	for(k=0;k<24;k++){
+		byteShift-=readLinear[k];i = structBuffer + byteShift;j = dumpBuffer + k;
+		while(i<structEnd){if(i>=structBuffer) memcpy(i,j,1);if(j>=dumpEnd) memset(i,0x4A,1);i+=24;j+=24;}
+	}
+	free(dumpBuffer);*/
+//PUCHAR structBuffer = NULL,structEnd = NULL;
+//structBuffer = malloc(dumpLength); structEnd = structBuffer + dumpLength;
+//int byteShift = 0;
+//int readLinear[24]={71,73,111,73,111,73,133,73,111,73,111,73,469,73,111,73,111,73,133,73,111,73,111,73};
+//int writeLinear[24]={145, 72, 727, 654, 1645, 1572, 2227, 2154, 339, 266, 921, 848, 1839, 1766, 2421, 2348, 533, 460, 1115, 1042, 2033, 1960, 2615, 2542};
+//commandsNum = 3*((int)(((LBAend - LBAstart)/0x0F)/3))
+//for(i=dumpBuffer+circleLength;i<dumpEnd;i+=circleLength) memcpy(i, dumpBuffer, circleLength);
+//k = circleLength/20;for(m = 0;m<20;m+=2)memset(dumpBuffer+k*m,0x54,k);
