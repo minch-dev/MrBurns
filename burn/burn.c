@@ -11,15 +11,21 @@
 #include "burn.h"
 #include <math.h>
 
+// 0x4A - не закрашенная область
+// 0x54 - закрашенная область
+
 PUCHAR tjtjBuffer = NULL, tjtjEnd = NULL;
 PUCHAR dumpBuffer = NULL, dumpEnd = NULL;
+PUCHAR emptyLineBuffer = NULL, emptyLineEnd = NULL;
 PUCHAR copyBuffer, copyEnd = NULL;
 PUCHAR writeBuffer = NULL;
+
 
 int dumpLength = 0, copyLength = 0, commandsNum = 0;
 int rawLength = 35280;
 int commandLength = 36720;
 int circleLength = 105840;
+BOOL addTracks = 0;
 
 BOOL status = 0;
 DWORD accessMode = 0, shareMode = 0;
@@ -39,27 +45,21 @@ FILE *ModeSelect10Data,*dump,*sample;
 int k = 0;
 int m = 0;
 int n = 0;
+int z = 0;
 PUCHAR i = 0;
 PUCHAR j = 0;
 const float PI = 3.14159265358979323846f;
 
 int LBA[33]={0x039D96, 0x04418B, 0x04EBEE, 0x059CC0, 0x0653FF, 0x0711AD, 0x07D5C8, 0x08A051, 0x097149, 0x0A48AE, 0x0B2682, 0x0C0AC3, 0x0CF572, 0x0DE690, 0x0EDE1B, 0x0FDC15, 0x10E07C, 0x11EB52, 0x12FC95, 0x141447, 0x153267, 0x1556F4, 0x1781F0, 0x18B359, 0x19EB31, 0x1B2977, 0x1C6E2A, 0x1DB94C, 0x1F0ADB, 0x2062d9, 0x21C145, 0x23261F, 0x249166};
 int LBAstart;
-float rStart = 26;
+float rStart;
 
-//0x039D96 - 0x039DF0 6 commands
-//0x039D96 - 0x03AB88 25-25.1
-//0x07D5C8 - 0x086ABA 31-32
-//0x07D5C8 - 0x08FFAC 31-33
-//0x1C6E2A - 0x1D031C 51-52
-//0x08A051 - 0x0B8DBB 32-37
-
-//--GrayCode variables
+//  переменные для кодов Грея
 int linesPerMm = 3413;	//	3413
 int partsNumber, partsWidth, partsOffset, partsShift;
-int trackWidth, grayCodeBits = 13;
+int trackWidth, grayCodeBits, emptyLineWidth, codeLineWidth;
 float partsRawWidth,
-	raidSize = 0.96923f,
+	raidSize, //x18 - 0.96923f
 	floorHalf = 0.5f;
 float trackRawWidth;
 
@@ -200,16 +200,33 @@ int
 __cdecl
 main(int argc,__nullterminated char *argv[])
 {
-	if (argc < 2) {
-		//printf("Examples:\n    spti F:");
-		argv[1] = "F:";
-		//return;
+	SetConsoleOutputCP(1251);
+	if (argc < 5) {
+		argv[4] = "D:";
+		if (argc < 4) {
+			//argv[0] всегда имя команды
+			//1 - начальный радиус
+			//2 - общая ширина дорожек
+			//3 - число бит
+			//4 - диск
+			printf("    burn [radius] [shirina] [chislo bit] ([Disk:]):\n    burn 25 1.0 13 F:");
+			return;
+		}
 	}
-	StringCbPrintf(string, sizeof(string), "\\\\.\\%s", argv[1]);
+	rStart = atof(argv[1]);
+	raidSize = atof(argv[2]);
+	grayCodeBits = atoi(argv[3]);
+	if((rStart<25)||(rStart>(58 - raidSize))){
+		printf("    Ne vishlo! Zapisivat' mojno v predelah 25-58 mm.");
+		return;
+	}
+
+
+	StringCbPrintf(string, sizeof(string), "\\\\.\\%s", argv[4]);	//ошибка в конечной версии тут
 	shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
 	accessMode = GENERIC_WRITE | GENERIC_READ;
 
-//--открываем привод
+//  открываем привод
 	fileHandle = CreateFile(string, accessMode, shareMode, NULL, OPEN_EXISTING, 0, NULL);
 	if (fileHandle == INVALID_HANDLE_VALUE) {
 		errorCode = GetLastError();
@@ -218,10 +235,10 @@ main(int argc,__nullterminated char *argv[])
 		return;
 	}
 
-//--узнаём параметры устройства и маску выравнивания
+//  узнаём параметры устройства и маску выравнивания
 	status = GetAlignmentMaskForDevice(fileHandle, &alignmentMask);
 
-//--если не удаётся запросить параметры устройства - ошибка
+//  если не удаётся запросить параметры устройства - ошибка
 	if (!status ) {
 		errorCode = GetLastError();
 		printf("Error getting device and/or adapter properties; error was %d\n", errorCode);
@@ -230,10 +247,10 @@ main(int argc,__nullterminated char *argv[])
 		return;
 	}
 
-//--выбираем режим
+//  выбираем режим
 	modeSelect();
 
-//--tjtjBuffer
+//  буфер с tjtj
 	tjtjBuffer = malloc(96);
 	i = tjtjBuffer;
 	tjtjEnd = tjtjBuffer+96;
@@ -242,8 +259,17 @@ main(int argc,__nullterminated char *argv[])
 	while (i<tjtjEnd){	memcpy(i, tjtjBuffer, 2);i+=2;	}
 	//for(i;i<tjtjEnd;i+=2)memcpy(i, tjtjBuffer, 2);
 
-//--buffers
-	dumpLength = circleLength *2;
+//  буфер для пустой линии
+	emptyLineBuffer = malloc(commandLength);
+	emptyLineEnd = emptyLineBuffer + commandLength;
+	memset(emptyLineBuffer,0x4A,commandLength);
+	i=emptyLineBuffer + 2352;
+	while (i<emptyLineEnd){
+		memcpy(i,tjtjBuffer,96);i+=2448;
+	}
+
+//  буферы
+	dumpLength = circleLength *2;	//удваиваем временный буфер, чтобы было проще реструктурировать его 
 	dumpBuffer = malloc(dumpLength);
 	dumpEnd = dumpBuffer + circleLength;
 
@@ -252,18 +278,23 @@ main(int argc,__nullterminated char *argv[])
 	copyEnd = copyBuffer + copyLength;
 
 	LBAstart = LBA[(int)(rStart-25)];
-	//trackRawWidth = linesPerMm * (raidSize /6);
-	trackRawWidth = linesPerMm * 6*PI*rStart/(4096 - 3*PI*15);
+	//trackRawWidth = linesPerMm * 6*PI*rStart/(4096 - 3*PI*15);
+	trackRawWidth = linesPerMm * (raidSize / grayCodeBits);
 	trackWidth = (int)(floorHalf + trackRawWidth);
-	commandsNum = trackWidth*3;
+	//commandsNum = trackWidth*3;
+	codeLineWidth = 3*(trackWidth / 5);
+	emptyLineWidth = 3*(trackWidth / 5 * 4);
+	
 
 	for (n=0;n<grayCodeBits;n++){
 
-	//--gen dump
+	//  создаём последовательность данных для записи
 		partsNumber = (int)pow(2,n);
 		if(n==0) partsNumber = 2;
 		partsRawWidth = (float) circleLength / partsNumber;
 		partsShift = (int)(floorHalf + (partsRawWidth/2));
+		if(addTracks == 1)
+			partsShift = (int)(floorHalf + partsRawWidth);
 		if(n==0) partsShift = 0;
 		memset(dumpBuffer,0x4A,circleLength);
 		for(k=0;k<partsNumber;k+=2){
@@ -274,9 +305,9 @@ main(int argc,__nullterminated char *argv[])
 		}
 		memcpy(dumpBuffer + circleLength, dumpBuffer, circleLength);
 
-	//--tests
+	//  проверки
 		//fopen_s(&dump,"V:\\dump.bin","wb+"); if(n==0)fwrite(dumpBuffer, circleLength, 1, dump); fclose(dump);
-	//--struct dump
+	//  структурируем данные
 		i = dumpBuffer;	j = dumpBuffer;	k = 0;
 		while(i<dumpEnd){
 			j = i + writeLinear[k];		//if(j>=dumpEnd) memset(i,0x4A,1); else memcpy(i,j,1);
@@ -284,7 +315,7 @@ main(int argc,__nullterminated char *argv[])
 			i++;k++;if(k>23)k=0;
 		}
 	
-	//--rewrite structed dump to copybuffer with tjtj blocks
+	//  переписываем структурированные данные в copybuffer вместе с tjtj блоками
 		i=copyBuffer;	j=dumpBuffer;
 		while (i<copyEnd){
 			memcpy(i,j,2352);i+=2352;j+=2352;
@@ -292,11 +323,23 @@ main(int argc,__nullterminated char *argv[])
 		}
 		//free(dumpBuffer);
 
-	//--write desu
-		printf("            *****       Fukken WRITE         *****\n");
+	//  пишем
+		printf("            *****       WRITE       *****\n");
+
+			//  пустая разделительная полоса
+		//z = emptyLineWidth;
+		//if(n==1) z *= 2;	
+		for(k=0;k<emptyLineWidth;k++){
+			ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
+			writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
+			memcpy(writeBuffer, emptyLineBuffer, commandLength);
+			modeWrite();
+			free(writeBuffer);
+			LBAstart += 0xF;
+		}
+
 		i = copyBuffer;
-		if(n==(grayCodeBits - 2)) commandsNum*=2;
-		for(k=0;k<commandsNum;k++){
+		for(k=0;k<codeLineWidth;k++){
 			ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
 			writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
 			memcpy(writeBuffer, i, commandLength);
@@ -306,11 +349,17 @@ main(int argc,__nullterminated char *argv[])
 			i += commandLength;
 			if(i>=copyEnd) i=copyBuffer;
 		}
-	
+		
+//		if(n==(grayCodeBits-1)){
+//			if(addTracks == 0){
+//				n-=2;
+//				addTracks = 1;
+//			}
+//		}	
 	}
 
 
-//--stop
+//  остановка
 	synchronizeCache();
 	for(k=0;k<10;k++){
 		testUnitReady();
@@ -325,7 +374,7 @@ main(int argc,__nullterminated char *argv[])
 	}
 
 
-//--clean
+//  подчищаем за собой
 	//if (pUnAlignedBuffer != NULL) free(pUnAlignedBuffer);
 	CloseHandle(fileHandle);
 }
@@ -592,3 +641,4 @@ Cleanup:
 //commandsNum = 3*((int)(((LBAend - LBAstart)/0x0F)/3))
 //for(i=dumpBuffer+circleLength;i<dumpEnd;i+=circleLength) memcpy(i, dumpBuffer, circleLength);
 //k = circleLength/20;for(m = 0;m<20;m+=2)memset(dumpBuffer+k*m,0x54,k);
+//if(n>=(grayCodeBits - 2)) z *= 2;	//для последних 2 треков в 2 раза шире
