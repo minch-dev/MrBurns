@@ -17,6 +17,7 @@
 PUCHAR tjtjBuffer = NULL, tjtjEnd = NULL;
 PUCHAR dumpBuffer = NULL, dumpEnd = NULL;
 PUCHAR emptyLineBuffer = NULL, emptyLineEnd = NULL;
+PUCHAR nastrLineBuffer = NULL, nastrLineEnd = NULL;
 PUCHAR copyBuffer, copyEnd = NULL;
 PUCHAR writeBuffer = NULL;
 
@@ -24,8 +25,9 @@ PUCHAR writeBuffer = NULL;
 int dumpLength = 0, copyLength = 0, commandsNum = 0;
 int rawLength = 35280;
 int commandLength = 36720;
-int circleLength = 105840;
-BOOL addTracks = 0;
+int fakeLength = 131072;	//2^17
+int circleLength =	105840;	// rawLength * 3;
+BOOL fon, addTracks = 0;
 
 BOOL status = 0;
 DWORD accessMode = 0, shareMode = 0;
@@ -57,7 +59,7 @@ float rStart;
 //  переменные для кодов Грея
 int linesPerMm = 3413;	//	3413
 int partsNumber, partsWidth, partsOffset, partsShift;
-int trackWidth, grayCodeBits, emptyLineWidth, codeLineWidth;
+int trackWidth, otnoshenie, grayCodeBits, emptyLineWidth, codeLineWidth;
 float partsRawWidth,
 	raidSize, //x18 - 0.96923f
 	floorHalf = 0.5f;
@@ -201,28 +203,33 @@ __cdecl
 main(int argc,__nullterminated char *argv[])
 {
 	SetConsoleOutputCP(1251);
-	if (argc < 5) {
-		argv[4] = "D:";
-		if (argc < 4) {
+	if (argc < 6) {
+		if (argc < 6) {
 			//argv[0] всегда имя команды
 			//1 - начальный радиус
 			//2 - общая ширина дорожек
-			//3 - число бит
-			//4 - диск
-			printf("    burn [radius] [shirina] [chislo bit] ([Disk:]):\n    burn 25 1.0 13 F:");
+			//3 - отношение
+			//4 - число бит
+			//5 - цвет фона
+			//6 - диск
+
+			printf("    burn [radius] [shirina] [otnoshenie] [chislo bit] [fon] [Disk:]\n    burn 25 1.0 5 13 0 D:");
 			return;
 		}
+		
 	}
 	rStart = atof(argv[1]);
 	raidSize = atof(argv[2]);
-	grayCodeBits = atoi(argv[3]);
+	otnoshenie = atoi(argv[3]);
+	grayCodeBits = atoi(argv[4]);
+	fon = atoi(argv[5]);
 	if((rStart<25)||(rStart>(58 - raidSize))){
 		printf("    Ne vishlo! Zapisivat' mojno v predelah 25-58 mm.");
 		return;
 	}
 
 
-	StringCbPrintf(string, sizeof(string), "\\\\.\\%s", argv[4]);	//ошибка в конечной версии тут
+	StringCbPrintf(string, sizeof(string), "\\\\.\\%s", argv[6]);	//ошибка в конечной версии тут
 	shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
 	accessMode = GENERIC_WRITE | GENERIC_READ;
 
@@ -262,9 +269,19 @@ main(int argc,__nullterminated char *argv[])
 //  буфер для пустой линии
 	emptyLineBuffer = malloc(commandLength);
 	emptyLineEnd = emptyLineBuffer + commandLength;
+	//if(fon) memset(emptyLineBuffer,0x54,commandLength);
 	memset(emptyLineBuffer,0x4A,commandLength);
 	i=emptyLineBuffer + 2352;
 	while (i<emptyLineEnd){
+		memcpy(i,tjtjBuffer,96);i+=2448;
+	}
+
+//  буфер для настроечной линии
+	nastrLineBuffer = malloc(commandLength);
+	nastrLineEnd = nastrLineBuffer + commandLength;
+	memset(nastrLineBuffer,0x54,commandLength);
+	i=nastrLineBuffer + 2352;
+	while (i<nastrLineEnd){
 		memcpy(i,tjtjBuffer,96);i+=2448;
 	}
 
@@ -282,27 +299,61 @@ main(int argc,__nullterminated char *argv[])
 	trackRawWidth = linesPerMm * (raidSize / grayCodeBits);
 	trackWidth = (int)(floorHalf + trackRawWidth);
 	//commandsNum = trackWidth*3;
-	codeLineWidth = 3*(trackWidth / 5);
-	emptyLineWidth = 3*(trackWidth / 5 * 4);
+	codeLineWidth = 3*(trackWidth / (otnoshenie + 1));
+	emptyLineWidth = 3*(trackWidth / (otnoshenie + 1) * otnoshenie);
 	
+	//настроечная полоса
+	for(k=0;k<(trackWidth*2);k++){
+		ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
+		writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
+		memcpy(writeBuffer, nastrLineBuffer, commandLength);
+		modeWrite();
+		free(writeBuffer);
+		LBAstart += 0xF;
+	}
+
+	//первая часть пустой полосы
+	for(k=0;k<(emptyLineWidth+codeLineWidth);k++){
+		ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
+		writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
+		memcpy(writeBuffer, emptyLineBuffer, commandLength);
+		modeWrite();
+		free(writeBuffer);
+		LBAstart += 0xF;
+	}
 
 	for (n=0;n<grayCodeBits;n++){
 
 	//  создаём последовательность данных для записи
 		partsNumber = (int)pow(2,n);
 		if(n==0) partsNumber = 2;
-		partsRawWidth = (float) circleLength / partsNumber;
-		partsShift = (int)(floorHalf + (partsRawWidth/2));
-		if(addTracks == 1)
-			partsShift = (int)(floorHalf + partsRawWidth);
+	// вариант кода для "размытой" записи (размер деления неодинаков из-за ограниченного числа делений, не совпадающего со степенью двойки)
+	//	partsRawWidth = (float) circleLength / partsNumber;
+	//	partsShift = (int)(floorHalf + (partsRawWidth/2));
+	//	if(addTracks == 1)	//вспомогательная переменная
+	//		partsShift = (int)(floorHalf + partsRawWidth);
+	//	if(n==0) partsShift = 0;
+	//	memset(dumpBuffer,0x4A,circleLength);
+	//	for(k=0;k<partsNumber;k+=2){
+	//		partsOffset = (int)((k* partsRawWidth)+floorHalf);
+	//		partsWidth = (int)(((k+1)*partsRawWidth)+floorHalf) - partsOffset;
+	//		partsOffset += partsShift; 
+	//		memset( (dumpBuffer+partsOffset), 0x54, partsWidth);
+	//	}
+
+
+		partsWidth = (int) fakeLength / partsNumber;
+		partsShift = (int) partsWidth / 2;
+		if(addTracks == 1)	//вспомогательная переменная
+			partsShift = partsWidth;
 		if(n==0) partsShift = 0;
 		memset(dumpBuffer,0x4A,circleLength);
 		for(k=0;k<partsNumber;k+=2){
-			partsOffset = (int)((k* partsRawWidth)+floorHalf);
-			partsWidth = (int)(((k+1)*partsRawWidth)+floorHalf) - partsOffset;
+			partsOffset = (int) k* partsWidth;
 			partsOffset += partsShift; 
 			memset( (dumpBuffer+partsOffset), 0x54, partsWidth);
 		}
+
 		memcpy(dumpBuffer + circleLength, dumpBuffer, circleLength);
 
 	//  проверки
@@ -326,7 +377,7 @@ main(int argc,__nullterminated char *argv[])
 	//  пишем
 		printf("            *****       WRITE       *****\n");
 
-			//  пустая разделительная полоса
+		//  пустая разделительная полоса
 		//z = emptyLineWidth;
 		//if(n==1) z *= 2;	
 		for(k=0;k<emptyLineWidth;k++){
@@ -350,12 +401,32 @@ main(int argc,__nullterminated char *argv[])
 			if(i>=copyEnd) i=copyBuffer;
 		}
 		
-//		if(n==(grayCodeBits-1)){
-//			if(addTracks == 0){
-//				n-=2;
-//				addTracks = 1;
-//			}
-//		}	
+		if(n==(grayCodeBits-1)){
+			if(addTracks == 0){
+				n-=1;
+				addTracks = 1;
+			}
+		}	
+	}
+
+	//пустая полосы
+	for(k=0;k<((emptyLineWidth*2)+codeLineWidth);k++){
+		ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
+		writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
+		memcpy(writeBuffer, emptyLineBuffer, commandLength);
+		modeWrite();
+		free(writeBuffer);
+		LBAstart += 0xF;
+	}
+
+	//настроечная полоса
+	for(k=0;k<(trackWidth*2);k++){
+		ZeroMemory(&sptdwb, sizeof(SCSI_PASS_THROUGH_DIRECT_WITH_BUFFER));
+		writeBuffer = AllocateAlignedBuffer(commandLength,alignmentMask, &pUnAlignedBuffer);
+		memcpy(writeBuffer, nastrLineBuffer, commandLength);
+		modeWrite();
+		free(writeBuffer);
+		LBAstart += 0xF;
 	}
 
 
