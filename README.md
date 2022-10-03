@@ -6,7 +6,9 @@ It burnz imagez on dizkz with IR LAZER BEAMZ (jEEZ!).
 
 # Result
 13 Bits of Gray DVD.
-![13 Bits of Gray DVD 1](photo/gray_code_dvd_inner_circle_13_bits_8192_steps_1.jpg)
+
+![13 Bits of Gray DVD 2](photo/gray_code_dvd_inner_circle_13_bits_8192_steps_2.jpg)
 
 It's exactly 8192 steps per revolution. Not bad, huh?
-![13 Bits of Gray DVD 2](photo/gray_code_dvd_inner_circle_13_bits_8192_steps_2.jpg)
+
+![13 Bits of Gray DVD 1](photo/gray_code_dvd_inner_circle_13_bits_8192_steps_1.jpg)
